@@ -57,6 +57,24 @@ export async function getApplicationDetail(id: string): Promise<ApplicationDetai
   };
 }
 
+export interface ApplicationWithNames extends Application {
+  candidateName?: string;
+  jobTitle?: string;
+}
+
+/** Confirmed candidates for one job -- the "Linked candidates" table on the
+ * screening workspace. An application can exist with no evaluation yet
+ * (screening not run); callers must render that as "Not run", not omit it. */
+export async function listApplicationsForJob(jobId: string): Promise<ApplicationWithNames[]> {
+  if (isRealApi()) {
+    return apiFetch<ApplicationWithNames[]>(`/applications?jobId=${encodeURIComponent(jobId)}`);
+  }
+  await delay();
+  return db.applications
+    .filter((a) => a.jobId === jobId)
+    .map((a) => ({ ...a, candidateName: getCandidate(a.candidateId)?.displayName, jobTitle: getJob(a.jobId)?.title }));
+}
+
 /** Simulated AI-assisted screening — deterministic per application so the
  * same candidate+job always yields the same demo result. Coverage-gated:
  * below the 70% coverage threshold, `overall` stays `null` rather than a

@@ -1,10 +1,19 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../../store/StoreContext";
-import { retryImportItem, runImportBatch, simulateSampleBatch, type ImportBatch, type ImportItemResult } from "../../data/api/imports";
+import {
+  cancelImportBatch,
+  getImportBatch,
+  retryImportItem,
+  runImportBatch,
+  simulateSampleBatch,
+  type ImportBatch,
+  type ImportItemResult,
+} from "../../data/api/imports";
+import { delay } from "../../data/api/shared";
 import { Icon } from "../../components/ui/Icons";
 import { Badge, Button } from "../../components/ui/Primitives";
-import { OUTCOME_BADGE, OUTCOME_DETAIL, formatFileSize } from "./importOutcome";
+import { describeItem, formatFileSize } from "./importOutcome";
 
 interface Run {
   id: string;
@@ -12,26 +21,40 @@ interface Run {
   batch?: ImportBatch;
 }
 
-const FAIL_OUTCOMES = new Set(["quarantined", "parse_failed", "too_large", "unsupported_type"]);
+const POLL_INTERVAL_MS = 700;
+const POLL_TIMEOUT_MS = 30_000;
+
+/** Real uploads hand candidate creation off to an async job (import chain plan,
+ * Phase 1) and return while it's still in flight. Poll until the batch leaves
+ * "processing" so the UI reflects what actually happened instead of a stale
+ * first response. No-op for mock batches, which are always already terminal. */
+async function pollUntilSettled(batch: ImportBatch, onUpdate: (batch: ImportBatch) => void): Promise<void> {
+  const startedAt = Date.now();
+  let current = batch;
+  while (current.status === "processing" && Date.now() - startedAt < POLL_TIMEOUT_MS) {
+    await delay(POLL_INTERVAL_MS);
+    current = await getImportBatch(batch.id);
+    onUpdate(current);
+  }
+}
 
 function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; onRetry: () => void; retrying: boolean }) {
   const { t } = useStore();
-  const badge = OUTCOME_BADGE[item.outcome as keyof typeof OUTCOME_BADGE] ?? { tone: "neutral" as const, label: item.status || item.outcome };
-  const outcomeDetail = OUTCOME_DETAIL[item.outcome as keyof typeof OUTCOME_DETAIL] ?? (item.errorMessage ?? item.status ?? item.outcome);
+  const { tone, label, detail } = describeItem(item);
   let action: React.ReactNode = null;
-  if (item.outcome === "new_resume_version" || item.outcome === "possible_same_person") {
-    action = item.duplicateReviewId ? (
+  if (item.status === "needs_review" && item.duplicateReviewId) {
+    action = (
       <Link className="btn btn-sm btn-secondary" to={`/duplicates/${item.duplicateReviewId}`}>
         {t("Review", "Review (action)")}
       </Link>
-    ) : null;
-  } else if (item.outcome === "new_candidate") {
-    action = item.candidateId ? (
+    );
+  } else if (item.status === "completed" && item.candidateId) {
+    action = (
       <Link className="btn btn-sm btn-secondary" to={`/candidates/${item.candidateId}`}>
         {t("Open profile")}
       </Link>
-    ) : null;
-  } else if (item.outcome === "parse_failed" || item.retryable) {
+    );
+  } else if (item.status === "failed" && item.retryable) {
     action = (
       <Button variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
         {t("Retry")}
@@ -41,6 +64,8 @@ function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; on
     action = <span className="tiny muted">{t("File isolated — not sent to AI")}</span>;
   } else if (item.outcome === "too_large" || item.outcome === "unsupported_type") {
     action = <span className="tiny muted">{t("Not accepted")}</span>;
+  } else if (item.status === "processing") {
+    action = <span className="tiny muted">{t("Working…")}</span>;
   } else {
     action = <span className="tiny muted">{t("No action needed")}</span>;
   }
@@ -52,15 +77,27 @@ function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; on
         <div style={{ fontSize: "var(--fs-sm)" }}>
           {item.fileName} <span className="tiny muted">({formatFileSize(item.sizeKB)})</span>
         </div>
-        <div className="tiny">{t(outcomeDetail)}</div>
+        <div className="tiny">{t(detail)}</div>
       </div>
-      <Badge tone={badge.tone}>{t(badge.label)}</Badge>
+      <Badge tone={tone}>{t(label)}</Badge>
       <div style={{ width: 130, textAlign: "right" }}>{action}</div>
     </div>
   );
 }
 
-function BatchCard({ run, onRetryItem, retryingId }: { run: Run; onRetryItem: (itemId: string) => void; retryingId: string | null }) {
+function BatchCard({
+  run,
+  onRetryItem,
+  retryingId,
+  onCancel,
+  cancelling,
+}: {
+  run: Run;
+  onRetryItem: (itemId: string) => void;
+  retryingId: string | null;
+  onCancel: (batchId: string) => void;
+  cancelling: boolean;
+}) {
   const { t } = useStore();
   if (!run.batch) {
     return (
@@ -78,25 +115,35 @@ function BatchCard({ run, onRetryItem, retryingId }: { run: Run; onRetryItem: (i
     );
   }
   const batch = run.batch;
-  const failCount = batch.items.filter((i) => FAIL_OUTCOMES.has(i.outcome)).length;
-  const stateBadge =
-    failCount === 0 ? (
-      <Badge tone="success">{t("Succeeded")}</Badge>
-    ) : failCount === batch.items.length ? (
-      <Badge tone="danger">{t("Failed")}</Badge>
-    ) : (
-      <Badge tone="warning">{t("Partially succeeded")}</Badge>
-    );
+  const doneCount = batch.items.filter((i) => i.status !== "processing").length;
+  const failCount = batch.items.filter((i) => i.status === "failed").length;
+  const isProcessing = batch.status === "processing";
+  const stateBadge = isProcessing ? (
+    <Badge tone="neutral">{t("Processing…")}</Badge>
+  ) : failCount === 0 ? (
+    <Badge tone="success">{t("Succeeded")}</Badge>
+  ) : failCount === batch.items.length ? (
+    <Badge tone="danger">{t("Failed")}</Badge>
+  ) : (
+    <Badge tone="warning">{t("Partially succeeded")}</Badge>
+  );
   return (
     <div className="card card-pad" style={{ marginTop: 14 }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
         <div className="section-title" style={{ margin: 0 }}>
-          {t("Batch")} {batch.id} — {batch.items.length}/{batch.items.length} {t("processed")}
+          {t("Batch")} {batch.id} — {doneCount}/{batch.items.length} {t("processed")}
         </div>
-        {stateBadge}
+        <div className="flex items-center" style={{ gap: 8 }}>
+          {isProcessing && (
+            <Button variant="secondary" size="sm" onClick={() => onCancel(batch.id)} disabled={cancelling}>
+              {t("Cancel")}
+            </Button>
+          )}
+          {stateBadge}
+        </div>
       </div>
       <div className="progress-track" style={{ marginBottom: 14 }}>
-        <div className="progress-fill" style={{ width: "100%" }} />
+        <div className="progress-fill" style={{ width: `${batch.items.length ? Math.round((doneCount / batch.items.length) * 100) : 100}%` }} />
       </div>
       {batch.items.map((item) => (
         <ImportItemRow key={item.id} item={item} onRetry={() => onRetryItem(item.id)} retrying={retryingId === item.id} />
@@ -110,13 +157,25 @@ export function UploadTab({ onChanged }: { onChanged?: () => void }) {
   const [dragOver, setDragOver] = useState(false);
   const [runs, setRuns] = useState<Run[]>([]);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const applyBatchUpdate = (id: string, batch: ImportBatch) => {
+    setRuns((prev) => prev.map((r) => (r.id === id ? { ...r, batch } : r)));
+    onChanged?.();
+  };
+
+  const finishRun = async (id: string, batch: ImportBatch) => {
+    applyBatchUpdate(id, batch);
+    if (batch.status === "processing") {
+      await pollUntilSettled(batch, (updated) => applyBatchUpdate(id, updated));
+    }
+  };
 
   const startRun = async (files: File[]) => {
     const id = "run-" + Date.now();
     setRuns((prev) => [{ id, fileCount: files.length }, ...prev]);
     const batch = files.length ? await runImportBatch(files) : await simulateSampleBatch();
-    setRuns((prev) => prev.map((r) => (r.id === id ? { ...r, batch } : r)));
-    onChanged?.();
+    await finishRun(id, batch);
   };
 
   const handleFiles = (fileList: FileList | File[]) => {
@@ -128,20 +187,32 @@ export function UploadTab({ onChanged }: { onChanged?: () => void }) {
     const id = "run-" + Date.now();
     setRuns((prev) => [{ id, fileCount: 6 }, ...prev]);
     const batch = await simulateSampleBatch();
-    setRuns((prev) => prev.map((r) => (r.id === id ? { ...r, batch } : r)));
-    onChanged?.();
+    await finishRun(id, batch);
   };
 
-  const handleRetryItem = async (itemId: string) => {
+  const handleRetryItem = async (runId: string, itemId: string) => {
     setRetryingId(itemId);
     try {
-      await retryImportItem(itemId);
+      const batch = await retryImportItem(itemId);
       say(t("Retry queued"));
-      onChanged?.();
+      await finishRun(runId, batch);
     } catch {
       say(t("This import item cannot be retried without a new upload."), { type: "error" });
     } finally {
       setRetryingId(null);
+    }
+  };
+
+  const handleCancel = async (runId: string, batchId: string) => {
+    setCancellingId(batchId);
+    try {
+      const batch = await cancelImportBatch(batchId);
+      applyBatchUpdate(runId, batch);
+      say(t("Batch cancelled"));
+    } catch {
+      say(t("Could not cancel this batch."), { type: "error" });
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -198,7 +269,14 @@ export function UploadTab({ onChanged }: { onChanged?: () => void }) {
         </Button>
       </div>
       {runs.map((run) => (
-        <BatchCard key={run.id} run={run} onRetryItem={handleRetryItem} retryingId={retryingId} />
+        <BatchCard
+          key={run.id}
+          run={run}
+          onRetryItem={(itemId) => handleRetryItem(run.id, itemId)}
+          retryingId={retryingId}
+          onCancel={(batchId) => handleCancel(run.id, batchId)}
+          cancelling={cancellingId === run.batch?.id}
+        />
       ))}
     </>
   );

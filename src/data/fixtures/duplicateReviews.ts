@@ -29,6 +29,7 @@ export interface DuplicateReview {
   id: string;
   kind: DuplicateKind;
   status: "open" | "resolved";
+  confidence?: number;
   uploaded: DuplicateUploadedSide;
   existing: DuplicateExistingSide;
   basis: string[];

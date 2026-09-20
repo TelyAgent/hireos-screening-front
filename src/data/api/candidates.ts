@@ -162,3 +162,20 @@ export async function addManualRecommendation(candidateId: string, jobId: string
   db.recommendations.push(rec);
   return rec;
 }
+
+export interface JobRecommendation extends CandidateJobRecommendation {
+  candidateName?: string;
+}
+
+/** Pending AI proposals for one job -- the "Suggested candidates" list on the
+ * screening workspace. Only "proposed" recommendations are returned; once a
+ * recruiter confirms, dismisses, or defers one it belongs in a different view. */
+export async function getJobRecommendations(jobId: string): Promise<JobRecommendation[]> {
+  if (isRealApi()) {
+    return apiFetch<JobRecommendation[]>(`/jobs/${jobId}/recommendations`);
+  }
+  await delay();
+  return db.recommendations
+    .filter((r) => r.jobId === jobId && r.status === "proposed")
+    .map((r) => ({ ...r, candidateName: getCandidate(r.candidateId)?.displayName }));
+}

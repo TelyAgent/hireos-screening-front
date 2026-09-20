@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useStore } from "../store/StoreContext";
-import { getDuplicateReview, resolveDuplicateReview, retryParse } from "../data/api/imports";
+import { getDuplicateReview, resolveDuplicateReview, retryParse, RESOLUTION_LABEL } from "../data/api/imports";
 import type { DuplicateReview, DuplicateResolutionOutcome } from "../data/fixtures/duplicateReviews";
 import { getCandidate, getPerson } from "../data/db";
 import { fmtDateTime } from "../lib/format";
@@ -68,7 +68,7 @@ export function DuplicateDetailPage() {
         <PageHeader title={t("Duplicate review — resolved")} crumbs={[{ label: t("My Tasks"), href: "/tasks" }, { label: t("Duplicate review") }]} />
         <div className="card card-pad">
           <div className="badge badge-success" style={{ marginBottom: 10 }}>
-            {t("Resolved:")} {t(review.resolutionLabel || "")}
+            {t("Resolved:")} {t(review.resolutionLabel || (review.resolutionOutcome ? RESOLUTION_LABEL[review.resolutionOutcome] : ""))}
           </div>
           <p style={{ fontSize: "var(--fs-sm)" }}>{t(review.resolutionNote || "")}</p>
           <p className="tiny">
@@ -177,6 +177,11 @@ export function DuplicateDetailPage() {
             <li key={b}>{b}</li>
           ))}
         </ul>
+        {typeof review.confidence === "number" && (
+          <p className="tiny muted" style={{ marginTop: 8, marginBottom: 0 }}>
+            {t("Match confidence:")} {Math.round(review.confidence * 100)}%
+          </p>
+        )}
         {review.changeSummary && (
           <p style={{ fontSize: "var(--fs-sm)", marginTop: 10 }}>
             <strong>{t("What changed:")}</strong> {review.changeSummary}
@@ -213,6 +218,9 @@ export function DuplicateDetailPage() {
             <>
               <Button variant="secondary" onClick={() => resolve("defer")}>
                 {t("Request more info")}
+              </Button>
+              <Button variant="secondary" onClick={() => resolve("reuse_file")}>
+                {t("Same file content — reuse existing")}
               </Button>
               <Button variant="secondary" onClick={() => resolve("same_person_new_version")}>
                 {t("Same person — merge as new version")}

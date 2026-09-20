@@ -95,6 +95,20 @@ export async function retryImportItem(id: string): Promise<ImportBatch> {
   throw new ApiError("ITEM_NOT_RETRYABLE", "This import item cannot be retried.");
 }
 
+/** Re-fetches a batch's current state. Real uploads finish candidate creation
+ * asynchronously (see the import chain plan's Phase 1), so the batch returned
+ * by `runImportBatch` may still show items as "processing" — callers should
+ * poll this until `status` is no longer "processing". */
+export async function getImportBatch(id: string): Promise<ImportBatch> {
+  if (isRealApi()) return apiFetch<ImportBatch>(`/imports/${id}`);
+  throw new ApiError("NOT_SUPPORTED", "Batch polling is only available against the real API.");
+}
+
+export async function cancelImportBatch(id: string): Promise<ImportBatch> {
+  if (isRealApi()) return apiFetch<ImportBatch>(`/imports/${id}/cancel`, { method: "POST" });
+  throw new ApiError("NOT_SUPPORTED", "Batch cancellation is only available against the real API.");
+}
+
 async function runMockImportBatch(files: { fileName: string; sizeKB: number }[]): Promise<ImportBatch> {
   const batchId = uid("batch");
   const batch: ImportBatch = { id: batchId, createdAt: new Date().toISOString(), status: "processing", items: [] };
@@ -202,7 +216,7 @@ export async function getDuplicateReview(id: string): Promise<DuplicateReview> {
   return review;
 }
 
-const RESOLUTION_LABEL: Record<DuplicateResolutionOutcome, string> = {
+export const RESOLUTION_LABEL: Record<DuplicateResolutionOutcome, string> = {
   reuse_file: "Reused existing file",
   different_person: "Kept as different person",
   same_person_new_version: "Saved as new version",

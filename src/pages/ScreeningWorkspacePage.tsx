@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../store/StoreContext";
 import { getJobDetail } from "../data/api/jobs";
-import { db, getApplicationsForJob, getCandidate, getEvaluation, getRecsForJob } from "../data/db";
+import { getJobRecommendations, type JobRecommendation } from "../data/api/candidates";
+import { getApplicationDetail, listApplicationsForJob, type ApplicationWithNames } from "../data/api/screening";
+import { db } from "../data/db";
 import type { Job } from "../data/fixtures/jobs";
-import type { Candidate } from "../data/fixtures/candidates";
-import type { Application } from "../data/fixtures/applications";
 import type { Evaluation } from "../data/fixtures/evaluations";
 import type { DecisionOutcome } from "../data/fixtures/decisions";
 import type { EligibilityStatus } from "../lib/scoring";
@@ -24,6 +24,8 @@ import {
 
 type EligFilter = "all" | EligibilityStatus;
 
+type WorkspaceRowData = { app: ApplicationWithNames; ev: Evaluation | undefined };
+
 const DECISION_LABEL: Record<DecisionOutcome, string> = {
   strong_advance: "Strong advance",
   advance: "Advance",
@@ -36,7 +38,7 @@ function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-function WorkspaceRow({ app, cand, ev }: { app: Application; cand: Candidate; ev: Evaluation | undefined }) {
+function WorkspaceRow({ app, ev }: WorkspaceRowData) {
   const { t } = useStore();
   const navigate = useNavigate();
   const decision = db.decisions[app.id];
@@ -53,10 +55,10 @@ function WorkspaceRow({ app, cand, ev }: { app: Application; cand: Candidate; ev
   return (
     <tr className="clickable" onClick={() => navigate(`/applications/${app.id}`)}>
       <td>
-        <CandidateAvatar id={cand.id} name={cand.displayName} />
+        <CandidateAvatar id={app.candidateId} name={app.candidateName || app.candidateId} />
       </td>
       <td>
-        <div style={{ fontWeight: 500 }}>{cand.displayName}</div>
+        <div style={{ fontWeight: 500 }}>{app.candidateName || app.candidateId}</div>
         {ev?.freshness === "stale" && <FreshnessBadge freshness="stale" />}
       </td>
       <td>{ev ? <EligibilityBadge status={ev.eligibilityStatus} /> : <Badge tone="outline">{t("Not run")}</Badge>}</td>
@@ -83,12 +85,29 @@ export function ScreeningWorkspacePage() {
   const { id = "" } = useParams();
   const { t, state } = useStore();
   const [job, setJob] = useState<Job | null | undefined>(undefined);
+  const [suggested, setSuggested] = useState<JobRecommendation[]>([]);
+  const [rows, setRows] = useState<WorkspaceRowData[]>([]);
   const [eligFilter, setEligFilter] = useState<EligFilter>("all");
 
-  const load = useCallback(() => {
-    getJobDetail(id)
-      .then(setJob)
-      .catch(() => setJob(null));
+  const load = useCallback(async () => {
+    try {
+      const jobDetail = await getJobDetail(id);
+      setJob(jobDetail);
+      const [recs, apps] = await Promise.all([
+        getJobRecommendations(jobDetail.id),
+        listApplicationsForJob(jobDetail.id),
+      ]);
+      setSuggested(recs);
+      // Each application's evaluation is fetched individually -- there is no
+      // bulk "evaluations for this job" endpoint, and at workspace scale
+      // (a handful of linked candidates per role) N requests is fine.
+      const details = await Promise.all(
+        apps.map((app) => getApplicationDetail(app.id).catch(() => null)),
+      );
+      setRows(apps.map((app, i) => ({ app, ev: details[i]?.evaluation || undefined })));
+    } catch {
+      setJob(null);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -96,12 +115,12 @@ export function ScreeningWorkspacePage() {
   }, [load]);
 
   if (job === undefined) return null;
+
   if (job === null) return <EmptyState icon="work_off" title={t("Job not found")} />;
 
-  const suggested = getRecsForJob(job.id).filter((r) => r.status === "proposed");
-  let rows = getApplicationsForJob(job.id).map((app) => ({ app, cand: getCandidate(app.candidateId)!, ev: getEvaluation(app.id) }));
-  if (eligFilter !== "all") rows = rows.filter((r) => r.ev && r.ev.eligibilityStatus === eligFilter);
-  rows = [...rows].sort((a, b) => (b.ev?.overall ?? -1) - (a.ev?.overall ?? -1));
+  let visibleRows = rows;
+  if (eligFilter !== "all") visibleRows = visibleRows.filter((r) => r.ev && r.ev.eligibilityStatus === eligFilter);
+  visibleRows = [...visibleRows].sort((a, b) => (b.ev?.overall ?? -1) - (a.ev?.overall ?? -1));
 
   return (
     <>
@@ -138,12 +157,9 @@ export function ScreeningWorkspacePage() {
               </tr>
             </thead>
             <tbody>
-              {suggested.map((r) => {
-                const cand = getCandidate(r.candidateId)!;
-                return (
-                  <RecommendationRow key={r.id} candidate={cand} confidence={confidenceLabel(r, state.lang)} rationale={r.rationale} />
-                );
-              })}
+              {suggested.map((r) => (
+                <RecommendationRow key={r.id} recommendation={r} confidence={confidenceLabel(r, state.lang)} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -160,7 +176,7 @@ export function ScreeningWorkspacePage() {
       <div className="page-header">
         <div className="underline-tabs" style={{ marginBottom: 0, borderBottom: "none" }}>
           <div className="u-tab active">
-            {t("Linked candidates")} <span className="cnt">{getApplicationsForJob(job.id).length}</span>
+            {t("Linked candidates")} <span className="cnt">{rows.length}</span>
           </div>
         </div>
         <div className="actions">
@@ -177,7 +193,7 @@ export function ScreeningWorkspacePage() {
         </div>
       </div>
       <div className="card">
-        {rows.length ? (
+        {visibleRows.length ? (
           <table className="data-table">
             <thead>
               <tr>
@@ -192,8 +208,8 @@ export function ScreeningWorkspacePage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <WorkspaceRow key={r.app.id} app={r.app} cand={r.cand} ev={r.ev} />
+              {visibleRows.map((r) => (
+                <WorkspaceRow key={r.app.id} app={r.app} ev={r.ev} />
               ))}
             </tbody>
           </table>
@@ -205,20 +221,21 @@ export function ScreeningWorkspacePage() {
   );
 }
 
-function RecommendationRow({ candidate, confidence, rationale }: { candidate: Candidate; confidence: string; rationale: string }) {
+function RecommendationRow({ recommendation, confidence }: { recommendation: JobRecommendation; confidence: string }) {
   const { t } = useStore();
   const navigate = useNavigate();
+  const name = recommendation.candidateName || recommendation.candidateId;
   return (
-    <tr className="clickable" onClick={() => navigate(`/candidates/${candidate.id}/jobs`)}>
+    <tr className="clickable" onClick={() => navigate(`/candidates/${recommendation.candidateId}/jobs`)}>
       <td>
         <span className="flex items-center gap-8">
-          <CandidateAvatar id={candidate.id} name={candidate.displayName} size="sm" /> {candidate.displayName}
+          <CandidateAvatar id={recommendation.candidateId} name={name} size="sm" /> {name}
         </span>
       </td>
       <td className="tiny">{confidence}</td>
-      <td className="tiny">{rationale}</td>
+      <td className="tiny">{recommendation.rationale}</td>
       <td className="text-right">
-        <Link className="btn btn-sm btn-primary" to={`/candidates/${candidate.id}/jobs`} onClick={(e) => e.stopPropagation()}>
+        <Link className="btn btn-sm btn-primary" to={`/candidates/${recommendation.candidateId}/jobs`} onClick={(e) => e.stopPropagation()}>
           {t("Review", "Review (action)")}
         </Link>
       </td>
