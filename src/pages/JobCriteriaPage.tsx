@@ -13,6 +13,7 @@ import { ConfirmDialog } from "../components/ui/Overlays";
 
 function JobStatusBadge({ status }: { status: Job["status"] }) {
   const { t } = useStore();
+  if (status === "draft") return <Badge tone="warning">{t("Draft")}</Badge>;
   if (status === "open") return <Badge tone="success">{t("Open", "Open (job status)")}</Badge>;
   if (status === "closed") return <Badge tone="outline">{t("Closed")}</Badge>;
   return <Badge tone="warning">{t("Paused")}</Badge>;

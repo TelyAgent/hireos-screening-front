@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../../store/StoreContext";
-import { runImportBatch, simulateSampleBatch, type ImportBatch, type ImportItemResult } from "../../data/api/imports";
+import { retryImportItem, runImportBatch, simulateSampleBatch, type ImportBatch, type ImportItemResult } from "../../data/api/imports";
 import { Icon } from "../../components/ui/Icons";
 import { Badge, Button } from "../../components/ui/Primitives";
 import { OUTCOME_BADGE, OUTCOME_DETAIL, formatFileSize } from "./importOutcome";
@@ -16,7 +16,8 @@ const FAIL_OUTCOMES = new Set(["quarantined", "parse_failed", "too_large", "unsu
 
 function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; onRetry: () => void; retrying: boolean }) {
   const { t } = useStore();
-  const badge = OUTCOME_BADGE[item.outcome];
+  const badge = OUTCOME_BADGE[item.outcome as keyof typeof OUTCOME_BADGE] ?? { tone: "neutral" as const, label: item.status || item.outcome };
+  const outcomeDetail = OUTCOME_DETAIL[item.outcome as keyof typeof OUTCOME_DETAIL] ?? (item.errorMessage ?? item.status ?? item.outcome);
   let action: React.ReactNode = null;
   if (item.outcome === "new_resume_version" || item.outcome === "possible_same_person") {
     action = item.duplicateReviewId ? (
@@ -30,7 +31,7 @@ function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; on
         {t("Open profile")}
       </Link>
     ) : null;
-  } else if (item.outcome === "parse_failed") {
+  } else if (item.outcome === "parse_failed" || item.retryable) {
     action = (
       <Button variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
         {t("Retry")}
@@ -51,7 +52,7 @@ function ImportItemRow({ item, onRetry, retrying }: { item: ImportItemResult; on
         <div style={{ fontSize: "var(--fs-sm)" }}>
           {item.fileName} <span className="tiny muted">({formatFileSize(item.sizeKB)})</span>
         </div>
-        <div className="tiny">{t(OUTCOME_DETAIL[item.outcome])}</div>
+        <div className="tiny">{t(outcomeDetail)}</div>
       </div>
       <Badge tone={badge.tone}>{t(badge.label)}</Badge>
       <div style={{ width: 130, textAlign: "right" }}>{action}</div>
@@ -131,12 +132,17 @@ export function UploadTab({ onChanged }: { onChanged?: () => void }) {
     onChanged?.();
   };
 
-  const handleRetryItem = (itemId: string) => {
+  const handleRetryItem = async (itemId: string) => {
     setRetryingId(itemId);
-    setTimeout(() => {
+    try {
+      await retryImportItem(itemId);
+      say(t("Retry queued"));
+      onChanged?.();
+    } catch {
+      say(t("This import item cannot be retried without a new upload."), { type: "error" });
+    } finally {
       setRetryingId(null);
-      say(t("Retried — file is still unreadable. Try re-scanning at a higher quality or upload a text-based PDF."), { type: "error" });
-    }, 900);
+    }
   };
 
   return (

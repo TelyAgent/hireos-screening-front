@@ -19,14 +19,25 @@ export interface ImportItemResult {
   id: string;
   fileName: string;
   sizeKB: number;
-  outcome: ImportOutcome;
+  outcome: ImportOutcome | string;
+  stage?: string;
+  status?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  retryable?: boolean;
+  attemptCount?: number;
+  completedAt?: string;
+  materialId?: string;
+  duplicateOfMaterialId?: string;
+  businessConsumeStatus?: string;
   candidateId?: string;
   duplicateReviewId?: string;
 }
 export interface ImportBatch {
   id: string;
+  operationId?: string;
   createdAt: string;
-  status: "processing" | "completed" | "partial";
+  status: "processing" | "completed" | "partial" | "failed" | "cancelled";
   items: ImportItemResult[];
 }
 
@@ -71,9 +82,17 @@ type MockUploadFileInput = { fileName: string; sizeKB: number };
 
 export async function runImportBatch(files: UploadFileInput[]): Promise<ImportBatch> {
   if (isRealApi()) {
-    return apiUpload<ImportBatch>("/imports", files);
+    return apiUpload<ImportBatch>("/imports", files, "files", {
+      "Idempotency-Key": `resume-import-${crypto.randomUUID()}`,
+    });
   }
   return runMockImportBatch(files.map((file) => ({ fileName: file.name, sizeKB: Math.max(1, Math.round(file.size / 1024)) })));
+}
+
+export async function retryImportItem(id: string): Promise<ImportBatch> {
+  if (isRealApi()) return apiFetch<ImportBatch>(`/import-items/${id}/retry`, { method: "POST" });
+  await delay(800);
+  throw new ApiError("ITEM_NOT_RETRYABLE", "This import item cannot be retried.");
 }
 
 async function runMockImportBatch(files: { fileName: string; sizeKB: number }[]): Promise<ImportBatch> {

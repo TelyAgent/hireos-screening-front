@@ -34,10 +34,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return body as T;
 }
 
-export async function apiUpload<T>(path: string, files: File[], fieldName = "files"): Promise<T> {
+export async function apiUpload<T>(
+  path: string,
+  files: File[],
+  fieldName = "files",
+  headers?: Record<string, string>,
+): Promise<T> {
   const form = new FormData();
   for (const file of files) form.append(fieldName, file, file.name);
-  return apiFetch<T>(path, { method: "POST", body: form });
+  return apiFetch<T>(path, { method: "POST", body: form, headers });
 }
 
 /** Simulated network latency — a real backend later replaces this whole layer. */

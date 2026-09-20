@@ -27,7 +27,7 @@ export interface Requirement {
   kind: RequirementKind;
 }
 
-export type JobStatus = "open" | "closed" | "paused";
+export type JobStatus = "draft" | "open" | "closed" | "paused";
 export type CriteriaStatus = "draft" | "confirmed";
 
 export interface WorkflowPolicy {
