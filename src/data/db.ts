@@ -22,6 +22,7 @@ import { AI_MODELS } from "./fixtures/aiModels";
 import { PREFERENCES } from "./fixtures/preferences";
 import { AUDIT } from "./fixtures/audit";
 import { HUMAN_ASSESSMENTS } from "./fixtures/humanAssessments";
+import { CORPORATE_MAILBOXES } from "./fixtures/corporateMailbox";
 
 /**
  * Single in-memory "backend" for the whole app session, mirroring the
@@ -57,6 +58,7 @@ export const db = {
   preferences: PREFERENCES,
   audit: AUDIT,
   humanAssessments: HUMAN_ASSESSMENTS,
+  corporateMailboxes: CORPORATE_MAILBOXES,
 };
 
 export { getPerson };
