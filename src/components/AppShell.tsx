@@ -29,9 +29,11 @@ const NAV_PRIMARY: NavItem[] = [
     to: "/jobs",
     icon: "work_outline",
     label: "Jobs",
-    isActive: (p) => p.startsWith("/jobs") || p.startsWith("/applications") || p.startsWith("/deliveries"),
+    // Comparisons only exist in the context of a job's shortlist (entered from that job's
+    // screening workspace) -- there's no standalone "the comparison" to link to from a
+    // global nav item, so it highlights Jobs instead of getting its own entry.
+    isActive: (p) => p.startsWith("/jobs") || p.startsWith("/applications") || p.startsWith("/deliveries") || p.startsWith("/comparisons"),
   },
-  { to: "/comparisons/cmp-job-a", icon: "compare_arrows", label: "Comparisons", isActive: (p) => p.startsWith("/comparisons") },
 ];
 const NAV_WORKSPACE: NavItem[] = [
   { to: "/files", icon: "cloud_upload", label: "Files & Integrations", isActive: (p) => p.startsWith("/files") },

@@ -2,16 +2,35 @@ import { db, getApplicationsForCandidate, getRecsForCandidate, getCandidate } fr
 import type { Candidate } from "../fixtures/candidates";
 import type { Application } from "../fixtures/applications";
 import type { CandidateJobRecommendation } from "../fixtures/recommendations";
+import type { JobDiscoveryRun } from "../fixtures/jobDiscovery";
 import { uid, daysAgo } from "../../lib/daysAgo";
 import { ApiError, apiFetch, delay, isRealApi } from "./shared";
 import { listJobs } from "./jobs";
 
-export async function getCandidateDetail(id: string): Promise<{
+export interface CandidateDetail {
   candidate: Candidate;
   resumeVersions: (typeof db.resumeVersions)[string];
   applications: Application[];
   recommendations: CandidateJobRecommendation[];
-}> {
+  jobDiscovery: JobDiscoveryRun & { isMatching: boolean };
+}
+
+interface RawMatchingStatus {
+  isMatching: boolean;
+  lastRun: { status: string; jobsScanned: number; reason: { message?: string } | null; lastRunAt: string; completedAt: string | null } | null;
+}
+
+function toJobDiscovery(matching: RawMatchingStatus): JobDiscoveryRun & { isMatching: boolean } {
+  return {
+    status: matching.isMatching ? "running" : ((matching.lastRun?.status as JobDiscoveryRun["status"]) ?? "not_started"),
+    lastRunAt: matching.lastRun?.lastRunAt ?? null,
+    jobsScanned: matching.lastRun?.jobsScanned ?? 0,
+    reason: matching.lastRun?.reason?.message,
+    isMatching: matching.isMatching,
+  };
+}
+
+export async function getCandidateDetail(id: string): Promise<CandidateDetail> {
   if (isRealApi()) {
     const [detail] = await Promise.all([
       apiFetch<{
@@ -19,19 +38,22 @@ export async function getCandidateDetail(id: string): Promise<{
         resumeVersions: (typeof db.resumeVersions)[string];
         applications: Application[];
         recommendations: CandidateJobRecommendation[];
+        matching: RawMatchingStatus;
       }>(`/candidates/${id}`),
       listJobs(),
     ]);
-    return detail;
+    return { ...detail, jobDiscovery: toJobDiscovery(detail.matching) };
   }
   await delay();
   const candidate = getCandidate(id);
   if (!candidate) throw new ApiError("NOT_FOUND", `Candidate ${id} not found`);
+  const run = db.jobDiscovery[id] || { status: "not_started" as const, lastRunAt: null, jobsScanned: 0 };
   return {
     candidate,
     resumeVersions: db.resumeVersions[id] || [],
     applications: getApplicationsForCandidate(id),
     recommendations: getRecsForCandidate(id),
+    jobDiscovery: { ...run, isMatching: run.status === "running" },
   };
 }
 

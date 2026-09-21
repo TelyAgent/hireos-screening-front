@@ -12,14 +12,23 @@ export function PasteTab() {
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [submitting, setSubmitting] = useState(false);
+
   const submit = async () => {
     if (!name.trim()) {
       say(t("Name is required"), { type: "error" });
       return;
     }
-    const candidate = await pasteProfile({ name, email, location, notes });
-    say(`${name} ${t("added to Resume Library")}`, { type: "success" });
-    navigate(`/candidates/${candidate.id}`);
+    setSubmitting(true);
+    try {
+      const candidate = await pasteProfile({ name, email, location, notes });
+      say(`${name} ${t("added to Resume Library")}`, { type: "success" });
+      navigate(`/candidates/${candidate.id}`);
+    } catch {
+      say(t("Could not add this candidate."), { type: "error" });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -46,7 +55,7 @@ export function PasteTab() {
         <label>{t("Background / notes")}</label>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t("Paste a summary, LinkedIn profile text, or notes from a conversation")} />
       </div>
-      <Button variant="primary" icon="add" onClick={submit}>
+      <Button variant="primary" icon="add" onClick={submit} disabled={submitting}>
         {t("Add to library")}
       </Button>
     </div>

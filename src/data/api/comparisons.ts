@@ -5,6 +5,32 @@ import type { Application } from "../fixtures/applications";
 import { uid } from "../../lib/daysAgo";
 import { ApiError, apiFetch, delay, isRealApi } from "./shared";
 
+/** Creates a new comparison set for a job's linked candidates. The backend
+ * requires every application to share the given job and at least one member;
+ * a meaningful comparison (see ComparePage) needs at least two. */
+export async function createComparison(jobId: string, purpose: string, applicationIds: string[]): Promise<ComparisonSet> {
+  if (isRealApi()) {
+    return apiFetch<ComparisonSet>("/comparisons", {
+      method: "POST",
+      body: JSON.stringify({ jobId, purpose, applicationIds }),
+    });
+  }
+  await delay();
+  const id = uid("cmp");
+  const cmp: ComparisonSet = {
+    id,
+    jobId,
+    purpose,
+    memberIds: applicationIds,
+    owner: "emma",
+    collaborators: [],
+    snapshots: [],
+    annotations: [],
+  };
+  db.comparisons[id] = cmp;
+  return cmp;
+}
+
 export async function getComparison(id: string): Promise<ComparisonSet> {
   if (isRealApi()) {
     const cmp = await apiFetch<ComparisonSet>(`/comparisons/${id}`);

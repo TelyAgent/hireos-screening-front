@@ -497,6 +497,28 @@ export function ComparePage() {
   if (cmp === undefined) return null;
   if (cmp === null) return <EmptyState icon="compare_arrows" title={t("Comparison not found")} />;
 
+  if (!cmp.snapshots.length) {
+    return (
+      <EmptyState
+        icon="compare_arrows"
+        title={t("No comparison data yet")}
+        body={t("This comparison hasn't been generated. Create the first snapshot from the current screening evaluations.")}
+        actions={
+          <Button
+            variant="primary"
+            onClick={async () => {
+              say(t("Generating comparison…"));
+              await refreshComparison(cmp.id);
+              load();
+            }}
+          >
+            {t("Generate comparison")}
+          </Button>
+        }
+      />
+    );
+  }
+
   const job = getJob(cmp.jobId)!;
   const members: Member[] = cmp.memberIds.map((appId) => {
     const app = getApplication(appId)!;

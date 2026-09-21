@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store/StoreContext";
 import { listLibraryEntries, runMatchAgain, type LibraryEntry } from "../data/api/library";
+import { ApiError } from "../data/api/shared";
 import { getPerson } from "../data/db";
 import { relTime } from "../lib/format";
 import { Icon } from "../components/ui/Icons";
@@ -30,7 +31,7 @@ function MatchStatusBadge({ entry }: { entry: LibraryEntry }) {
 }
 
 export function LibraryPage() {
-  const { t, state } = useStore();
+  const { t, state, say } = useStore();
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -49,7 +50,15 @@ export function LibraryPage() {
 
   const handleMatchAgain = async (candidateId: string) => {
     setMatching(candidateId);
-    await runMatchAgain(candidateId);
+    try {
+      await runMatchAgain(candidateId);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "MATCH_IN_PROGRESS") {
+        say(t("A matching run is already in progress for this candidate."), { type: "info" });
+      } else {
+        say(t("Could not start matching."), { type: "error" });
+      }
+    }
     setMatching(null);
     load(query);
   };
@@ -140,9 +149,9 @@ export function LibraryPage() {
                         e.stopPropagation();
                         handleMatchAgain(candidate.id);
                       }}
-                      disabled={matching === candidate.id}
+                      disabled={matching === candidate.id || entry.matchStatus === "running"}
                     >
-                      {t("Match again")}
+                      {entry.matchStatus === "running" ? t("Matching…") : t("Match again")}
                     </Button>
                   </td>
                 </tr>

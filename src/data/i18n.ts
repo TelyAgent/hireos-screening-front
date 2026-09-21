@@ -166,6 +166,9 @@ export const ZH: Record<string, string> = {
   "Matching failed": "匹配失败",
   "Not matched yet": "尚未匹配",
   "Match again": "重新匹配",
+  "Matching…": "匹配中…",
+  "A matching run is already in progress for this candidate.": "该候选人已有一个匹配任务正在进行中。",
+  "Could not start matching.": "无法启动匹配。",
   "Every candidate stays here whether or not they’re linked to a job — resumes can arrive before any role exists.":
     "无论是否关联职位，所有候选人都会保留在此处 —— 简历可以在职位创建之前就先到达。",
   "Paste profile": "粘贴档案",
@@ -230,6 +233,7 @@ export const ZH: Record<string, string> = {
   "Add to library": "加入简历库",
   "Name is required": "姓名为必填项",
   "added to Resume Library": "已加入简历库",
+  "Could not add this candidate.": "无法添加该候选人。",
   "Authorized mailboxes are read on a schedule, or on demand. Reading a message doesn’t mean the business object is imported — that’s tracked separately below.":
     "已授权邮箱会按计划或按需读取。读取一封邮件并不代表业务对象已被导入 —— 该状态会在下方单独追踪。",
   "Last read": "最近读取",
@@ -343,6 +347,7 @@ export const ZH: Record<string, string> = {
   "None captured": "未记录",
   Education: "教育经历",
   "Searching for matching roles…": "正在搜索匹配职位…",
+  "AI matching is running in the background — this can take up to a minute.": "AI 匹配正在后台运行 —— 最长可能需要一分钟。",
   "This usually takes a few seconds in the demo.": "在演示中通常需要几秒钟。",
   "No open roles right now": "目前没有开放职位",
   "There are currently no open, accessible jobs to match against.": "目前没有可用于匹配的开放且可访问的职位。",

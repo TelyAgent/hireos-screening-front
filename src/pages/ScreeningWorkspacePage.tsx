@@ -4,6 +4,7 @@ import { useStore } from "../store/StoreContext";
 import { getJobDetail } from "../data/api/jobs";
 import { getJobRecommendations, type JobRecommendation } from "../data/api/candidates";
 import { getApplicationDetail, listApplicationsForJob, type ApplicationWithNames } from "../data/api/screening";
+import { createComparison, refreshComparison } from "../data/api/comparisons";
 import { db } from "../data/db";
 import type { Job } from "../data/fixtures/jobs";
 import type { Evaluation } from "../data/fixtures/evaluations";
@@ -12,6 +13,7 @@ import type { EligibilityStatus } from "../lib/scoring";
 import { confidenceLabel, inferRecommendation } from "../lib/scoring";
 import {
   Badge,
+  Button,
   CandidateAvatar,
   CoverageBar,
   EligibilityBadge,
@@ -83,11 +85,13 @@ function WorkspaceRow({ app, ev }: WorkspaceRowData) {
 
 export function ScreeningWorkspacePage() {
   const { id = "" } = useParams();
-  const { t, state } = useStore();
+  const { t, state, say } = useStore();
+  const navigate = useNavigate();
   const [job, setJob] = useState<Job | null | undefined>(undefined);
   const [suggested, setSuggested] = useState<JobRecommendation[]>([]);
   const [rows, setRows] = useState<WorkspaceRowData[]>([]);
   const [eligFilter, setEligFilter] = useState<EligFilter>("all");
+  const [creatingComparison, setCreatingComparison] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -114,6 +118,23 @@ export function ScreeningWorkspacePage() {
     load();
   }, [load]);
 
+  const handleCompare = async () => {
+    if (!job || rows.length < 2) return;
+    setCreatingComparison(true);
+    try {
+      const cmp = await createComparison(job.id, `Shortlist review — ${job.title}`, rows.map((r) => r.app.id));
+      // A comparison with zero snapshots has nothing for the page to render -- generate
+      // the first one immediately so "Compare candidates" actually produces a comparison,
+      // not an empty shell the user has to know to refresh.
+      await refreshComparison(cmp.id);
+      navigate(`/comparisons/${cmp.id}`);
+    } catch {
+      say(t("Could not create the comparison."), { type: "error" });
+    } finally {
+      setCreatingComparison(false);
+    }
+  };
+
   if (job === undefined) return null;
 
   if (job === null) return <EmptyState icon="work_off" title={t("Job not found")} />;
@@ -133,9 +154,14 @@ export function ScreeningWorkspacePage() {
             <Link className="btn btn-secondary" to={`/jobs/${job.id}/criteria`}>
               {t("Requirements & rubric")}
             </Link>
-            <Link className="btn btn-primary" to="/comparisons/cmp-job-a">
+            <Button
+              variant="primary"
+              onClick={handleCompare}
+              disabled={rows.length < 2 || creatingComparison}
+              title={rows.length < 2 ? t("Link at least two candidates to this job before comparing.") : undefined}
+            >
               {t("Compare candidates")}
-            </Link>
+            </Button>
           </>
         }
       />

@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useStore } from "../store/StoreContext";
-import { getCandidateDetail, correctProfile } from "../data/api/candidates";
+import { getCandidateDetail, correctProfile, type CandidateDetail } from "../data/api/candidates";
 import { runMatchAgain } from "../data/api/library";
+import { ApiError } from "../data/api/shared";
 import { db, getJob, getPerson } from "../data/db";
 import type { Candidate } from "../data/fixtures/candidates";
-import type { Application } from "../data/fixtures/applications";
-import type { CandidateJobRecommendation } from "../data/fixtures/recommendations";
 import type { JobDiscoveryRun } from "../data/fixtures/jobDiscovery";
 import { fmtDate, fmtMoney, relTime } from "../lib/format";
 import { Icon } from "../components/ui/Icons";
 import { Button, CandidateAvatar, EmptyState, PageHeader } from "../components/ui/Primitives";
 import { Modal } from "../components/ui/Overlays";
+
+const MATCH_POLL_INTERVAL_MS = 3000;
+const MATCH_POLL_TIMEOUT_MS = 90_000;
 
 const REC_STATUS_TONE: Record<string, string> = {
   dismissed: "badge-outline",
@@ -21,7 +23,7 @@ const REC_STATUS_TONE: Record<string, string> = {
 export function NoJobState({ jd, onMatchAgain, onCorrect }: { candidate: Candidate; jd: JobDiscoveryRun; onMatchAgain: () => void; onCorrect: () => void }) {
   const { t } = useStore();
   if (jd.status === "running")
-    return <EmptyState icon="travel_explore" title={t("Searching for matching roles…")} body={t("This usually takes a few seconds in the demo.")} />;
+    return <EmptyState icon="travel_explore" title={t("Searching for matching roles…")} body={t("AI matching is running in the background — this can take up to a minute.")} />;
   if (jd.status === "no_open_jobs")
     return (
       <EmptyState
@@ -155,13 +157,8 @@ function CorrectProfileModal({ candidate, onClose, onSaved }: { candidate: Candi
 
 export function CandidateProfilePage() {
   const { id = "" } = useParams();
-  const { t, state } = useStore();
-  const [detail, setDetail] = useState<{
-    candidate: Candidate;
-    resumeVersions: { id: string; version: number; fileName: string; uploadedAt: string; source: string; isLatest: boolean; changeNote?: string }[];
-    applications: Application[];
-    recommendations: CandidateJobRecommendation[];
-  } | null | undefined>(undefined);
+  const { t, state, say } = useStore();
+  const [detail, setDetail] = useState<CandidateDetail | null | undefined>(undefined);
   const [showCorrect, setShowCorrect] = useState(false);
   const [matching, setMatching] = useState(false);
 
@@ -174,6 +171,23 @@ export function CandidateProfilePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A match already in flight (auto-triggered on paste/upload, or a prior manual
+  // click) has no completion event to subscribe to yet -- poll until it settles so
+  // the "run matching" control doesn't stay disabled forever and results appear
+  // without a manual refresh.
+  useEffect(() => {
+    if (!detail?.jobDiscovery.isMatching) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (Date.now() - startedAt > MATCH_POLL_TIMEOUT_MS) {
+        window.clearInterval(timer);
+        return;
+      }
+      load();
+    }, MATCH_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [detail?.jobDiscovery.isMatching, load]);
 
   if (detail === undefined) return null;
   if (detail === null) {
@@ -190,8 +204,7 @@ export function CandidateProfilePage() {
     );
   }
 
-  const { candidate, resumeVersions, applications, recommendations } = detail;
-  const jd: JobDiscoveryRun = db.jobDiscovery[candidate.id] || { status: "not_started", lastRunAt: null, jobsScanned: 0 };
+  const { candidate, resumeVersions, applications, recommendations, jobDiscovery: jd } = detail;
   const pendingRecs = recommendations.filter((r) => r.status === "proposed");
   const versions = [...resumeVersions].sort((a, b) => b.version - a.version);
   const owner = getPerson(candidate.owner);
@@ -242,8 +255,17 @@ export function CandidateProfilePage() {
   ];
 
   const handleMatchAgain = async () => {
+    if (jd.isMatching) return;
     setMatching(true);
-    await runMatchAgain(candidate.id);
+    try {
+      await runMatchAgain(candidate.id);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "MATCH_IN_PROGRESS") {
+        say(t("A matching run is already in progress for this candidate."), { type: "info" });
+      } else {
+        say(t("Could not start matching."), { type: "error" });
+      }
+    }
     setMatching(false);
     load();
   };
@@ -259,8 +281,8 @@ export function CandidateProfilePage() {
             <Button variant="secondary" icon="edit" onClick={() => setShowCorrect(true)}>
               {t("Correct profile")}
             </Button>
-            <Button variant="secondary" icon="travel_explore" onClick={handleMatchAgain} disabled={matching}>
-              {t("Match again")}
+            <Button variant="secondary" icon="travel_explore" onClick={handleMatchAgain} disabled={matching || jd.isMatching}>
+              {jd.isMatching ? t("Matching…") : t("Match again")}
             </Button>
             <Link className="btn btn-primary" to={`/candidates/${candidate.id}/jobs`}>
               <Icon name="work_outline" />
