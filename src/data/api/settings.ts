@@ -129,3 +129,24 @@ export async function syncCorporateMailbox(id: string): Promise<CorporateMailbox
   db.corporateMailboxes = db.corporateMailboxes.map((m) => (m.id === id ? mailbox : m));
   return { ...mailbox, recentMessages: [] };
 }
+
+export interface MailboxImportResult {
+  mailbox: CorporateMailbox;
+  messagesScanned: number;
+  attachmentsImported: number;
+  batchId?: string;
+}
+
+/** Pulls resume-looking attachments out of unseen mail into the Resume Library
+ * via the normal import pipeline -- this is what the "Import from email" tab's
+ * "立即读取" button calls, distinct from the lightweight `syncCorporateMailbox`
+ * status check used on the Preferences page. */
+export async function importFromMailbox(id: string): Promise<MailboxImportResult> {
+  if (isRealApi()) return apiFetch<MailboxImportResult>(`/settings/corporate-mailboxes/${id}/import`, { method: "POST" });
+  const existing = db.corporateMailboxes.find((m) => m.id === id);
+  if (!existing) throw new ApiError("NOT_FOUND", `Mailbox ${id} not found`);
+  await delay(700);
+  const mailbox = { ...existing, lastSyncedAt: new Date().toISOString(), lastSyncMessageCount: 1 };
+  db.corporateMailboxes = db.corporateMailboxes.map((m) => (m.id === id ? mailbox : m));
+  return { mailbox, messagesScanned: 1, attachmentsImported: 0 };
+}

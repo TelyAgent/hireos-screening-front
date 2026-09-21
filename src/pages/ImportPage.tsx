@@ -39,7 +39,7 @@ export function ImportPage() {
         <div>
           {tab === "upload" && <UploadTab onChanged={bump} />}
           {tab === "paste" && <PasteTab />}
-          {tab === "email" && <EmailTab />}
+          {tab === "email" && <EmailTab onChanged={bump} />}
           {tab === "folder" && <FolderTab />}
           {tab === "api" && <ApiTab />}
         </div>
