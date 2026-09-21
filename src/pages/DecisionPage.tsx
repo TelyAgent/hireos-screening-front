@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../store/StoreContext";
 import { generateReviewOnlyReport, recordDecision, sendDeclineNotice, type NextStepTarget } from "../data/api/decisions";
+import { findTaskForApplication, claimTask } from "../data/api/tasks";
+import { isRealApi } from "../data/api/shared";
 import { db, getApplication, getCandidate, getConcerns, getEvaluation, getJob } from "../data/db";
 import type { Application } from "../data/fixtures/applications";
 import type { DecisionOutcome } from "../data/fixtures/decisions";
@@ -166,6 +168,20 @@ export function DecisionPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Landing on the decision page is the real signal that someone has started
+  // working this — claim the "screening_review" task (open -> in_progress) so
+  // the task list reflects it without a separate manual step. Best-effort: a
+  // missing/already-claimed task or a transient failure never blocks the page.
+  useEffect(() => {
+    if (!isRealApi() || !id) return;
+    findTaskForApplication(id)
+      .then((task) => {
+        if (task && task.status === "open") return claimTask(task.id, state.currentUser);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (app === undefined) return null;
   if (app === null) return <EmptyState icon="search_off" title={t("Application not found")} />;

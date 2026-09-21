@@ -30,6 +30,7 @@ export interface Task {
   needsRefresh?: boolean;
   createdOrFollowed?: boolean;
   linkRoute: string;
+  applicationId?: string;
   candidateId?: string;
   jobId?: string;
 }
