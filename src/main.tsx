@@ -53,7 +53,7 @@ root.render(
     >
       <AntApp>
         <StoreProvider>
-          <BrowserRouter>
+          <BrowserRouter basename={(import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.BASE_URL || "/"}>
             <ErrorBoundary>
               <App />
             </ErrorBoundary>

@@ -8,7 +8,7 @@ export type TextSize = "small" | "medium" | "large";
 export interface ToastItem {
   id: string;
   msg: string;
-  type: "default" | "success" | "error";
+  type: "default" | "success" | "info" | "error";
   actionLabel?: string;
 }
 
